@@ -1,12 +1,13 @@
 import logger from '../utils/logger'
 import { QueueManager } from '../queue/QueueManager'
 import { BaseCommand } from './base'
-import { getDataSourceForSubdomain } from '../DataSource'
+import { getDataSourceForSubdomain, init } from '../DataSource'
 import { Telemetry } from '../utils/telemetry'
 import { NodesPool } from '../NodesPool'
 import { CachePool } from '../CachePool'
 import { QueueEvents, QueueEventsListener } from 'bullmq'
 import { AbortControllerPool } from '../AbortControllerPool'
+import { DataSource } from 'typeorm'
 
 interface CustomListener extends QueueEventsListener {
     abort: (args: { id: string }, id: string) => void
@@ -54,9 +55,23 @@ export default class Worker extends BaseCommand {
     }
 
     async prepareData() {
-        // Init database - use a default subdomain for worker
-        const appDataSource = await getDataSourceForSubdomain('default')
-        await appDataSource.runMigrations({ transaction: 'each' })
+        let appDataSource: DataSource;
+        // Initialize database
+        try {
+            await init()
+            const dataSource = await getDataSourceForSubdomain('default', undefined)
+            if (!dataSource) {
+                logger.error('Failed to initialize database connection')
+                await this.failExit()
+                throw new Error('Failed to initialize database connection')
+            }
+            appDataSource = dataSource
+            await appDataSource.runMigrations({ transaction: 'each' })
+        } catch (error) {
+            logger.error('There was an error initializing the database...', error)
+            await this.failExit()
+            throw error
+        }
 
         // Initialize abortcontroller pool
         const abortControllerPool = new AbortControllerPool()

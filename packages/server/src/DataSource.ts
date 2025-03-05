@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { DataSource } from 'typeorm'
+import { Request } from 'express'
 import { entities } from './database/entities'
 
 interface DatabaseConfig {
@@ -8,6 +9,17 @@ interface DatabaseConfig {
     username: string
     password: string
     port?: number
+}
+
+// Extend Express Request to include queryStore
+declare global {
+    namespace Express {
+        interface Request {
+            queryStore?: {
+                [key: string]: string | string[] | any | undefined
+            }
+        }
+    }
 }
 
 let elevateDataSource: DataSource
@@ -36,18 +48,37 @@ export const init = async (): Promise<void> => {
 }
 
 // Get database configuration for a subdomain from elevate database
-async function getDatabaseConfig(subdomain: string): Promise<DatabaseConfig> {
-    const result = await elevateDataSource.query(
-        `select top 1 db.instance, db.[database], CONVERT(VARCHAR(MAX), [user]) [user], CONVERT(VARCHAR(MAX), pass) pass
-         from voyagerdb db
-         join voyagerdbcred cred on cred.voyagerdbid = db.id
-         join company c on c.id = db.companyid
-         where c.domain = @0`,
-        [subdomain]
-    )
+async function getDatabaseConfig(subdomain: string, req?: Request): Promise<DatabaseConfig> {
+    // Check if all required query parameters are present
+    const companyId = req?.queryStore?.CompanyId
+    const databaseId = req?.queryStore?.DatabaseId
+    const databaseCredId = req?.queryStore?.DatabaseCredId
+
+    let query: string
+    let params: any[]
+
+    if (companyId && databaseId && databaseCredId) {
+        query = `select top 1 db.instance, db.[database], CONVERT(VARCHAR(MAX), [user]) [user], CONVERT(VARCHAR(MAX), pass) pass
+                from voyagerdb db
+                join voyagerdbcred cred on cred.voyagerdbid = db.id
+                join company c on c.id = db.companyid
+                where c.id = @0
+                and db.id = @1
+                and cred.id = @2`
+        params = [companyId, databaseId, databaseCredId]
+    } else {
+        query = `select top 1 db.instance, db.[database], CONVERT(VARCHAR(MAX), [user]) [user], CONVERT(VARCHAR(MAX), pass) pass
+                from voyagerdb db
+                join voyagerdbcred cred on cred.voyagerdbid = db.id
+                join company c on c.id = db.companyid
+                where c.domain = @0`
+        params = [subdomain]
+    }
+
+    const result = await elevateDataSource.query(query, params)
 
     if (!result || result.length === 0) {
-        throw new Error(`No database configuration found for subdomain: ${subdomain}`)
+        throw new Error(`No database configuration found for ${companyId ? 'company ID: ' + companyId : 'subdomain: ' + subdomain}`)
     }
 
     return {
@@ -65,9 +96,9 @@ function getConnectionKey(config: DatabaseConfig): string {
 }
 
 // Get or create a data source for the given subdomain
-export async function getDataSourceForSubdomain(subdomain: string): Promise<DataSource> {
+export async function getDataSourceForSubdomain(subdomain: string, req?: Request): Promise<DataSource> {
     // Get database configuration from elevate database
-    const config = await getDatabaseConfig(subdomain)
+    const config = await getDatabaseConfig(subdomain, req)
     const connectionKey = getConnectionKey(config)
 
     // Check if we already have an initialized connection

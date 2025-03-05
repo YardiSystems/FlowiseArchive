@@ -57,8 +57,8 @@ export const validateSubdomain = async (req: Request, res: Response, next: NextF
             })
         }
 
-        // Get or create the data source for this subdomain
-        const dataSource = await getDataSourceForSubdomain(subdomain)
+        // Get data source for subdomain
+        const dataSource = await getDataSourceForSubdomain(subdomain, req)
 
         // Get the App instance and update its DataSource
         const app = getInstance()

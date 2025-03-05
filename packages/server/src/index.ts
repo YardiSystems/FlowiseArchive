@@ -28,6 +28,7 @@ import { QueueManager } from './queue/QueueManager'
 import { RedisEventSubscriber } from './queue/RedisEventSubscriber'
 import { WHITELIST_URLS } from './utils/constants'
 import { validateSubdomain } from './middleware/SubdomainValidation'
+import { queryParamsStore } from './middleware/QueryParamsStore'
 import 'global-agent/bootstrap'
 
 declare global {
@@ -74,7 +75,7 @@ export class App {
             await init()
             
             // Get the data sources - use a known valid subdomain for initial setup
-            this.AppDataSource = await getDataSourceForSubdomain('pmgroup')
+            this.AppDataSource = await getDataSourceForSubdomain('pmgroup', undefined)
             this.ElevateDataSource = getElevateDataSource()
             
             logger.info('📦 [server]: Data Source is initializing...')
@@ -131,13 +132,24 @@ export class App {
     async config() {
         // Limit is needed to allow sending/receiving base64 encoded string
         const flowise_file_size_limit = process.env.FLOWISE_FILE_SIZE_LIMIT || '50mb'
+        
+        // CORS configuration
+        const corsOptions = getCorsOptions()
+        this.app.use(cors(corsOptions))
+
+        // Request logging
+        this.app.use(expressRequestLogger)
+
+        // Query params store middleware
+        this.app.use(queryParamsStore)
+
+        // Body parser configuration
         this.app.use(express.json({ limit: flowise_file_size_limit }))
         this.app.use(express.urlencoded({ limit: flowise_file_size_limit, extended: true }))
+
+        // Configure proxy trust if specified
         if (process.env.NUMBER_OF_PROXIES && parseInt(process.env.NUMBER_OF_PROXIES) > 0)
             this.app.set('trust proxy', parseInt(process.env.NUMBER_OF_PROXIES))
-
-        // Allow access from specified domains
-        this.app.use(cors(getCorsOptions()))
 
         // Allow embedding from specified domains.
         this.app.use((req, res, next) => {
