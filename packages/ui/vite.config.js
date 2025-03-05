@@ -21,6 +21,7 @@ export default defineConfig(async ({ mode }) => {
     dotenv.config()
     return {
         plugins: [react()],
+        base: './',
         resolve: {
             alias: {
                 '@': resolve(__dirname, 'src')
