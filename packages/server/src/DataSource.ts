@@ -76,6 +76,23 @@ export const init = async (): Promise<void> => {
                 migrations: postgresMigrations
             })
             break
+        case 'mssql':
+            appDataSource = new DataSource({
+                type: 'mssql',
+                host: process.env.DATABASE_HOST,
+                port: parseInt(process.env.DATABASE_PORT || '1433'),
+                username: process.env.DATABASE_USER,
+                password: process.env.DATABASE_PASSWORD,
+                database: process.env.DATABASE_NAME,
+                synchronize: false,
+                migrationsRun: false,
+                entities: Object.values(entities),
+                options: {
+                    encrypt: process.env.DATABASE_SSL === 'true',
+                    trustServerCertificate: process.env.DATABASE_SSL === 'true'
+                }
+            })
+            break
         default:
             homePath = process.env.DATABASE_PATH ?? flowisePath
             appDataSource = new DataSource({
