@@ -1,114 +1,19 @@
 import 'reflect-metadata'
-import path from 'path'
-import * as fs from 'fs'
 import { DataSource } from 'typeorm'
-import { getUserHome } from './utils'
 import { entities } from './database/entities'
-import { sqliteMigrations } from './database/migrations/sqlite'
-import { mysqlMigrations } from './database/migrations/mysql'
-import { mariadbMigrations } from './database/migrations/mariadb'
-import { postgresMigrations } from './database/migrations/postgres'
 
-let appDataSource: DataSource
+interface DatabaseConfig {
+    host: string
+    database: string
+    username: string
+    password: string
+    port?: number
+}
+
 let elevateDataSource: DataSource
+const dataSources: Map<string, DataSource> = new Map()
 
 export const init = async (): Promise<void> => {
-    let homePath
-    let flowisePath = path.join(getUserHome(), '.flowise')
-    if (!fs.existsSync(flowisePath)) {
-        fs.mkdirSync(flowisePath)
-    }
-
-    // Initialize main database connection (Flowise database)
-    switch (process.env.DATABASE_TYPE) {
-        case 'sqlite':
-            homePath = process.env.DATABASE_PATH ?? flowisePath
-            appDataSource = new DataSource({
-                type: 'sqlite',
-                database: path.resolve(homePath, 'database.sqlite'),
-                synchronize: false,
-                migrationsRun: false,
-                entities: Object.values(entities),
-                migrations: sqliteMigrations
-            })
-            break
-        case 'mysql':
-            appDataSource = new DataSource({
-                type: 'mysql',
-                host: process.env.DATABASE_HOST,
-                port: parseInt(process.env.DATABASE_PORT || '3306'),
-                username: process.env.DATABASE_USER,
-                password: process.env.DATABASE_PASSWORD,
-                database: process.env.DATABASE_NAME,
-                charset: 'utf8mb4',
-                synchronize: false,
-                migrationsRun: false,
-                entities: Object.values(entities),
-                migrations: mysqlMigrations,
-                ssl: getDatabaseSSLFromEnv()
-            })
-            break
-        case 'mariadb':
-            appDataSource = new DataSource({
-                type: 'mariadb',
-                host: process.env.DATABASE_HOST,
-                port: parseInt(process.env.DATABASE_PORT || '3306'),
-                username: process.env.DATABASE_USER,
-                password: process.env.DATABASE_PASSWORD,
-                database: process.env.DATABASE_NAME,
-                charset: 'utf8mb4',
-                synchronize: false,
-                migrationsRun: false,
-                entities: Object.values(entities),
-                migrations: mariadbMigrations,
-                ssl: getDatabaseSSLFromEnv()
-            })
-            break
-        case 'postgres':
-            appDataSource = new DataSource({
-                type: 'postgres',
-                host: process.env.DATABASE_HOST,
-                port: parseInt(process.env.DATABASE_PORT || '5432'),
-                username: process.env.DATABASE_USER,
-                password: process.env.DATABASE_PASSWORD,
-                database: process.env.DATABASE_NAME,
-                ssl: getDatabaseSSLFromEnv(),
-                synchronize: false,
-                migrationsRun: false,
-                entities: Object.values(entities),
-                migrations: postgresMigrations
-            })
-            break
-        case 'mssql':
-            appDataSource = new DataSource({
-                type: 'mssql',
-                host: process.env.DATABASE_HOST,
-                port: parseInt(process.env.DATABASE_PORT || '1433'),
-                username: process.env.DATABASE_USER,
-                password: process.env.DATABASE_PASSWORD,
-                database: process.env.DATABASE_NAME,
-                synchronize: false,
-                migrationsRun: false,
-                entities: Object.values(entities),
-                options: {
-                    encrypt: process.env.DATABASE_SSL === 'true',
-                    trustServerCertificate: process.env.DATABASE_SSL === 'true'
-                }
-            })
-            break
-        default:
-            homePath = process.env.DATABASE_PATH ?? flowisePath
-            appDataSource = new DataSource({
-                type: 'sqlite',
-                database: path.resolve(homePath, 'database.sqlite'),
-                synchronize: false,
-                migrationsRun: false,
-                entities: Object.values(entities),
-                migrations: sqliteMigrations
-            })
-            break
-    }
-
     // Initialize elevate database connection (Company database)
     elevateDataSource = new DataSource({
         type: 'mssql',
@@ -119,7 +24,6 @@ export const init = async (): Promise<void> => {
         database: process.env.ELEVATE_DATABASE_NAME,
         synchronize: false,
         migrationsRun: false,
-        // No entities or migrations needed for the elevate database
         entities: [],
         migrations: [],
         options: {
@@ -127,17 +31,78 @@ export const init = async (): Promise<void> => {
             trustServerCertificate: process.env.ELEVATE_DATABASE_SSL === 'true'
         }
     })
+
+    await elevateDataSource.initialize()
 }
 
-// Synchronous getter for the main database (Flowise database)
-export function getDataSource(): DataSource {
-    if (!appDataSource) {
-        throw new Error('Database not initialized. Call init() first.')
+// Get database configuration for a subdomain from elevate database
+async function getDatabaseConfig(subdomain: string): Promise<DatabaseConfig> {
+    const result = await elevateDataSource.query(
+        `select top 1 db.instance, db.[database], CONVERT(VARCHAR(MAX), [user]) [user], CONVERT(VARCHAR(MAX), pass) pass
+         from voyagerdb db
+         join voyagerdbcred cred on cred.voyagerdbid = db.id
+         join company c on c.id = db.companyid
+         where c.domain = @0`,
+        [subdomain]
+    )
+
+    if (!result || result.length === 0) {
+        throw new Error(`No database configuration found for subdomain: ${subdomain}`)
     }
-    return appDataSource
+
+    return {
+        host: result[0].instance,
+        database: result[0].database,
+        username: result[0].user,
+        password: result[0].pass,
+        port: parseInt(process.env.DATABASE_PORT || '1433')
+    }
 }
 
-// Synchronous getter for the elevate database (Company database)
+// Get connection key for caching
+function getConnectionKey(config: DatabaseConfig): string {
+    return `${config.host}_${config.username}_${config.database}`
+}
+
+// Get or create a data source for the given subdomain
+export async function getDataSourceForSubdomain(subdomain: string): Promise<DataSource> {
+    // Get database configuration from elevate database
+    const config = await getDatabaseConfig(subdomain)
+    const connectionKey = getConnectionKey(config)
+
+    // Check if we already have an initialized connection
+    let dataSource = dataSources.get(connectionKey)
+    if (dataSource && dataSource.isInitialized) {
+        return dataSource
+    }
+
+    // Create new connection if it doesn't exist
+    dataSource = new DataSource({
+        type: 'mssql',
+        host: config.host,
+        port: config.port || 1433,
+        username: config.username,
+        password: config.password,
+        database: config.database,
+        synchronize: false,
+        migrationsRun: false,
+        entities: Object.values(entities),
+        options: {
+            encrypt: false,
+            trustServerCertificate: true
+        }
+    })
+
+    // Initialize the connection
+    await dataSource.initialize()
+
+    // Store the connection
+    dataSources.set(connectionKey, dataSource)
+
+    return dataSource
+}
+
+// Get elevate data source
 export function getElevateDataSource(): DataSource {
     if (!elevateDataSource) {
         throw new Error('Database not initialized. Call init() first.')
@@ -145,14 +110,16 @@ export function getElevateDataSource(): DataSource {
     return elevateDataSource
 }
 
-const getDatabaseSSLFromEnv = () => {
-    if (process.env.DATABASE_SSL_KEY_BASE64) {
-        return {
-            rejectUnauthorized: false,
-            ca: Buffer.from(process.env.DATABASE_SSL_KEY_BASE64, 'base64')
+// Close all connections
+export async function closeAllConnections(): Promise<void> {
+    for (const [key, dataSource] of dataSources.entries()) {
+        if (dataSource.isInitialized) {
+            await dataSource.destroy()
         }
-    } else if (process.env.DATABASE_SSL === 'true') {
-        return true
+        dataSources.delete(key)
     }
-    return undefined
+
+    if (elevateDataSource && elevateDataSource.isInitialized) {
+        await elevateDataSource.destroy()
+    }
 }

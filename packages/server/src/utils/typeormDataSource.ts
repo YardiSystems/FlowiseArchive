@@ -1,4 +1,8 @@
 import { DataSource } from 'typeorm'
-import { getDataSource } from '../DataSource'
+import { getDataSourceForSubdomain } from '../DataSource'
 
-export const dataSource: DataSource = getDataSource()
+// This function replaces the direct dataSource export
+// Callers will need to be updated to use this async function
+export async function getTypeORMDataSource(subdomain: string = 'default'): Promise<DataSource> {
+    return getDataSourceForSubdomain(subdomain)
+}

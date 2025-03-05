@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
-import { getElevateDataSource } from '../DataSource'
-import { DynamicDataSource } from '../DynamicDataSource'
+import { getElevateDataSource, getDataSourceForSubdomain } from '../DataSource'
 import logger from '../utils/logger'
+import { getInstance } from '../index'
 
 export const validateSubdomain = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -57,9 +57,14 @@ export const validateSubdomain = async (req: Request, res: Response, next: NextF
             })
         }
 
-        // Get or create the dynamic data source for this subdomain
-        const dynamicDataSource = DynamicDataSource.getInstance()
-        const dataSource = await dynamicDataSource.getDataSource(subdomain)
+        // Get or create the data source for this subdomain
+        const dataSource = await getDataSourceForSubdomain(subdomain)
+
+        // Get the App instance and update its DataSource
+        const app = getInstance()
+        if (app) {
+            app.AppDataSource = dataSource
+        }
 
         // Add the validated company info and data source to the request for later use
         req.subdomain = subdomain

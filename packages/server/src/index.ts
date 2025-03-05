@@ -8,7 +8,7 @@ import { DataSource } from 'typeorm'
 import { MODE } from './Interface'
 import { getNodeModulesPackagePath, getEncryptionKey } from './utils'
 import logger, { expressRequestLogger } from './utils/logger'
-import { getDataSource, getElevateDataSource, init } from './DataSource'
+import { getElevateDataSource, init, getDataSourceForSubdomain } from './DataSource'
 import { NodesPool } from './NodesPool'
 import { ChatFlow } from './database/entities/ChatFlow'
 import { CachePool } from './CachePool'
@@ -73,15 +73,9 @@ export class App {
             // Initialize both database connections
             await init()
             
-            // Get the data sources
-            this.AppDataSource = getDataSource()
+            // Get the data sources - use a known valid subdomain for initial setup
+            this.AppDataSource = await getDataSourceForSubdomain('pmgroup')
             this.ElevateDataSource = getElevateDataSource()
-            
-            // Initialize the connections
-            await Promise.all([
-                this.AppDataSource.initialize(),
-                this.ElevateDataSource.initialize()
-            ])
             
             logger.info('📦 [server]: Data Source is initializing...')
 
