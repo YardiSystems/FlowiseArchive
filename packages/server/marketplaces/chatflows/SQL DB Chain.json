@@ -214,6 +214,10 @@
                             {
                                 "label": "MySQL",
                                 "name": "mysql"
+                            },
+                            {
+                                "label": "Elevate",
+                                "name": "elevate"
                             }
                         ],
                         "default": "sqlite",

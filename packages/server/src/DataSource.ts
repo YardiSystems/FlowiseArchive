@@ -10,6 +10,7 @@ import { mariadbMigrations } from './database/migrations/mariadb'
 import { postgresMigrations } from './database/migrations/postgres'
 
 let appDataSource: DataSource
+let elevateDataSource: DataSource
 
 export const init = async (): Promise<void> => {
     let homePath
@@ -17,6 +18,8 @@ export const init = async (): Promise<void> => {
     if (!fs.existsSync(flowisePath)) {
         fs.mkdirSync(flowisePath)
     }
+
+    // Initialize main database connection (Flowise database)
     switch (process.env.DATABASE_TYPE) {
         case 'sqlite':
             homePath = process.env.DATABASE_PATH ?? flowisePath
@@ -105,13 +108,41 @@ export const init = async (): Promise<void> => {
             })
             break
     }
+
+    // Initialize elevate database connection (Company database)
+    elevateDataSource = new DataSource({
+        type: 'mssql',
+        host: process.env.ELEVATE_DATABASE_HOST,
+        port: parseInt(process.env.ELEVATE_DATABASE_PORT || '1433'),
+        username: process.env.ELEVATE_DATABASE_USER,
+        password: process.env.ELEVATE_DATABASE_PASSWORD,
+        database: process.env.ELEVATE_DATABASE_NAME,
+        synchronize: false,
+        migrationsRun: false,
+        // No entities or migrations needed for the elevate database
+        entities: [],
+        migrations: [],
+        options: {
+            encrypt: process.env.ELEVATE_DATABASE_SSL === 'true',
+            trustServerCertificate: process.env.ELEVATE_DATABASE_SSL === 'true'
+        }
+    })
 }
 
+// Synchronous getter for the main database (Flowise database)
 export function getDataSource(): DataSource {
-    if (appDataSource === undefined) {
-        init()
+    if (!appDataSource) {
+        throw new Error('Database not initialized. Call init() first.')
     }
     return appDataSource
+}
+
+// Synchronous getter for the elevate database (Company database)
+export function getElevateDataSource(): DataSource {
+    if (!elevateDataSource) {
+        throw new Error('Database not initialized. Call init() first.')
+    }
+    return elevateDataSource
 }
 
 const getDatabaseSSLFromEnv = () => {

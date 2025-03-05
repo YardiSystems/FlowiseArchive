@@ -8,7 +8,7 @@ import { DataSource } from 'typeorm'
 import { MODE } from './Interface'
 import { getNodeModulesPackagePath, getEncryptionKey } from './utils'
 import logger, { expressRequestLogger } from './utils/logger'
-import { getDataSource } from './DataSource'
+import { getDataSource, getElevateDataSource, init } from './DataSource'
 import { NodesPool } from './NodesPool'
 import { ChatFlow } from './database/entities/ChatFlow'
 import { CachePool } from './CachePool'
@@ -27,6 +27,7 @@ import { OpenTelemetry } from './metrics/OpenTelemetry'
 import { QueueManager } from './queue/QueueManager'
 import { RedisEventSubscriber } from './queue/RedisEventSubscriber'
 import { WHITELIST_URLS } from './utils/constants'
+import { validateSubdomain } from './middleware/SubdomainValidation'
 import 'global-agent/bootstrap'
 
 declare global {
@@ -55,7 +56,8 @@ export class App {
     cachePool: CachePool
     telemetry: Telemetry
     rateLimiterManager: RateLimiterManager
-    AppDataSource: DataSource = getDataSource()
+    AppDataSource: DataSource
+    ElevateDataSource: DataSource
     sseStreamer: SSEStreamer
     metricsProvider: IMetricsProvider
     queueManager: QueueManager
@@ -68,7 +70,19 @@ export class App {
     async initDatabase() {
         // Initialize database
         try {
-            await this.AppDataSource.initialize()
+            // Initialize both database connections
+            await init()
+            
+            // Get the data sources
+            this.AppDataSource = getDataSource()
+            this.ElevateDataSource = getElevateDataSource()
+            
+            // Initialize the connections
+            await Promise.all([
+                this.AppDataSource.initialize(),
+                this.ElevateDataSource.initialize()
+            ])
+            
             logger.info('📦 [server]: Data Source is initializing...')
 
             // Run Migrations Scripts
@@ -89,7 +103,7 @@ export class App {
 
             // Initialize Rate Limit
             this.rateLimiterManager = RateLimiterManager.getInstance()
-            await this.rateLimiterManager.initializeRateLimiters(await getDataSource().getRepository(ChatFlow).find())
+            await this.rateLimiterManager.initializeRateLimiters(await this.AppDataSource.getRepository(ChatFlow).find())
 
             // Initialize cache pool
             this.cachePool = new CachePool()
@@ -151,6 +165,9 @@ export class App {
 
         // Add the sanitizeMiddleware to guard against XSS
         this.app.use(sanitizeMiddleware)
+
+        // Add subdomain validation middleware
+        this.app.use(validateSubdomain)
 
         const whitelistURLs = WHITELIST_URLS
         const URL_CASE_INSENSITIVE_REGEX: RegExp = /\/api\/v1\//i
