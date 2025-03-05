@@ -3,7 +3,6 @@
 
 # Run image
 # docker run -d -p 3000:3000 flowise
-
 FROM harbork8s.yardiapp.com/proxy-public-hub-docker-com/library/node:20-alpine
 RUN apk add --update libc6-compat python3 make g++
 # needed for pdfjs-dist
