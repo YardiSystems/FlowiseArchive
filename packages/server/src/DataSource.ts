@@ -54,25 +54,35 @@ async function getDatabaseConfig(subdomain: string, req?: Request): Promise<Data
     const databaseId = req?.queryStore?.DatabaseId
     const databaseCredId = req?.queryStore?.DatabaseCredId
 
+    const passphrase = process.env.ELEVATE_PASSPHRASE 
+
     let query: string
     let params: any[]
 
     if (companyId && databaseId && databaseCredId) {
-        query = `select top 1 db.instance, db.[database], CONVERT(VARCHAR(MAX), [user]) [user], CONVERT(VARCHAR(MAX), pass) pass
+        query = `select top 1 
+                    db.instance, 
+                    db.[database],
+                    CAST(DecryptByPassphrase(@0 + '-' + c.[guid], cred.[user]) AS VARCHAR(100)) AS [user],
+                    CAST(DecryptByPassphrase(@0 + '-' + c.[guid], cred.[pass]) AS VARCHAR(100)) AS pass
                 from voyagerdb db
                 join voyagerdbcred cred on cred.voyagerdbid = db.id
                 join company c on c.id = db.companyid
-                where c.id = @0
-                and db.id = @1
-                and cred.id = @2`
-        params = [companyId, databaseId, databaseCredId]
+                where c.id = @1
+                and db.id = @2
+                and cred.id = @3`
+        params = [passphrase, companyId, databaseId, databaseCredId]
     } else {
-        query = `select top 1 db.instance, db.[database], CONVERT(VARCHAR(MAX), [user]) [user], CONVERT(VARCHAR(MAX), pass) pass
+        query = `select top 1 
+                    db.instance, 
+                    db.[database],
+                    CAST(DecryptByPassphrase(@0 + '-' + c.[guid], cred.[user]) AS VARCHAR(100)) AS [user],
+                    CAST(DecryptByPassphrase(@0 + '-' + c.[guid], cred.[pass]) AS VARCHAR(100)) AS pass
                 from voyagerdb db
                 join voyagerdbcred cred on cred.voyagerdbid = db.id
                 join company c on c.id = db.companyid
-                where c.domain = @0`
-        params = [subdomain]
+                where c.domain = @1`
+        params = [passphrase, subdomain]
     }
 
     const result = await elevateDataSource.query(query, params)
