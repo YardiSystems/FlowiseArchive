@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { getElevateDataSource } from '../DataSource'
+import { DynamicDataSource } from '../DynamicDataSource'
 import logger from '../utils/logger'
 
 export const validateSubdomain = async (req: Request, res: Response, next: NextFunction) => {
@@ -22,10 +23,10 @@ export const validateSubdomain = async (req: Request, res: Response, next: NextF
         }
 
         // Get elevate database connection
-        const dataSource = getElevateDataSource()
+        const elevateDataSource = getElevateDataSource()
         
         // Query the company table in elevate database
-        const result = await dataSource.query(
+        const result = await elevateDataSource.query(
             `SELECT id, name, domain, inactive, status, issingledomain, isinternal, allowcustommenus, issql, 
                     authenticationmode, yardioneurl, yardipin, address, city, state, zipcode, phone, 
                     companylogo, createddate, Address2, Country, Notes, IsOmniEnabled, guid, updateddate, 
@@ -56,9 +57,14 @@ export const validateSubdomain = async (req: Request, res: Response, next: NextF
             })
         }
 
-        // Add the validated company info to the request for later use
+        // Get or create the dynamic data source for this subdomain
+        const dynamicDataSource = DynamicDataSource.getInstance()
+        const dataSource = await dynamicDataSource.getDataSource(subdomain)
+
+        // Add the validated company info and data source to the request for later use
         req.subdomain = subdomain
         req.company = company
+        req.dataSource = dataSource
         next()
     } catch (error) {
         logger.error('Error validating subdomain:', error)
